@@ -14,8 +14,8 @@ app.use(bodyParser.json());
 
 // ---- MySQL connection via Sequelize ----
 const DB_NAME = process.env.DB_NAME || "quizdb";
-const DB_USER = process.env.DB_USER || "quizuser";
-const DB_PASS = process.env.DB_PASS || "quizpass";
+const DB_USER = process.env.DB_USER || "root";
+const DB_PASS = process.env.DB_PASS || "root";
 const DB_HOST = process.env.DB_HOST || "localhost";
 const DB_PORT = process.env.DB_PORT || "3306";
 
@@ -56,25 +56,34 @@ app.post("/generate-quiz", async (req, res) => {
     }
 
     const doc = nlp(text);
-    // Try nouns first; fallback to a reasonably long word
-    let nouns = doc.nouns().out("array");
-    let entity = nouns.length ? nouns[0] : null;
-    if (!entity) {
-      const words = text.split(/\s+/).filter(w => w.replace(/[^a-zA-Z]/g, "").length > 4);
-      entity = words[0] || "_____";
+    const sentences = doc.sentences().out("array");
+
+    const distractors = ["Oxygen", "Glucose", "Hemoglobin", "Nitrogen", "Protein"];
+    const quizzes = [];
+
+    for (let sentence of sentences) {
+      const d = nlp(sentence);
+      let nouns = d.nouns().out("array");
+      let entity = nouns.length ? nouns[0] : null;
+
+      if (!entity) {
+        const words = sentence.split(/\s+/).filter(w => w.replace(/[^a-zA-Z]/g, "").length > 4);
+        entity = words[0] || "_____";
+      }
+
+      const question = sentence.replace(entity, "_____", 1);
+      const options = [entity, ...distractors.filter(d => d.toLowerCase() !== entity.toLowerCase()).slice(0, 3)];
+
+      const quiz = await Quiz.create({
+        question,
+        options: JSON.stringify(options),
+        answer: entity
+      });
+
+      quizzes.push({ id: quiz.id, question, options, answer: entity });
     }
 
-    const question = text.replace(entity, "_____", 1);
-    const distractors = ["Oxygen", "Glucose", "Hemoglobin", "Nitrogen", "Protein"];
-    const options = [entity, ...distractors.filter(d => d.toLowerCase() !== entity.toLowerCase()).slice(0,3)];
-
-    const quiz = await Quiz.create({
-      question,
-      options: JSON.stringify(options),
-      answer: entity
-    });
-
-    res.json({ id: quiz.id, question, options, answer: entity });
+    res.json(quizzes);
   } catch (err) {
     console.error(err);
     res.status(500).json({ detail: "Server error" });
